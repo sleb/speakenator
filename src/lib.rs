@@ -1,19 +1,8 @@
-use std::{num::ParseIntError, result};
+mod error;
 
-type Result<T> = result::Result<T, SpeakError>;
-
-#[derive(Debug, PartialEq, Eq)]
-struct SpeakError {
-    message: String,
-}
-
-impl From<ParseIntError> for SpeakError {
-    fn from(e: ParseIntError) -> Self {
-        SpeakError {
-            message: format!("ParseIntError: {}", e.to_string()),
-        }
-    }
-}
+use dsv::Parser;
+use error::{Result, SpeakError};
+use std::{fs::File, num::ParseIntError, path::PathBuf, result, str::FromStr};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Name {
@@ -28,15 +17,34 @@ impl Name {
             last: String::from(last),
         }
     }
+}
 
-    pub fn parse(s: &str) -> Name {
+impl FromStr for Name {
+    type Err = SpeakError;
+
+    fn from_str(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.split_whitespace().collect();
-        match parts.as_slice() {
+        Ok(match parts.as_slice() {
             [first] => Name::new(first, ""),
             [first @ .., last] => Name::new(&first.join(" "), last),
             _ => Name::new("", ""),
-        }
+        })
     }
+}
+
+#[derive(clap::Parser, Debug)]
+pub struct Args {
+    pub history_file: PathBuf,
+}
+
+pub fn list_speakers(args: &Args) -> Result<()> {
+    let history_file = File::open(&args.history_file)?;
+    let rows = Parser::new().parse(history_file);
+    for row in rows {
+        println!("{:?}", row);
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,16 +62,21 @@ impl Day {
             day: day,
         }
     }
+}
 
-    fn parse(s: &str) -> Result<Day> {
+impl FromStr for Day {
+    type Err = SpeakError;
+
+    fn from_str(s: &str) -> Result<Self> {
         let parts: result::Result<Vec<u32>, ParseIntError> =
             s.split('/').map(|part| part.parse()).collect();
 
-        match parts?.as_slice() {
+        match parts
+            .map_err(|_| SpeakError::Date(s.to_string()))?
+            .as_slice()
+        {
             &[month, day, year] => Ok(Day::new(year, month, day)),
-            _ => Err(SpeakError {
-                message: format!("Problem parsing `{}' as a Day", s),
-            }),
+            _ => Err(SpeakError::Date(s.to_string())),
         }
     }
 }
@@ -75,36 +88,36 @@ mod tests {
     #[test]
     fn parse_name() {
         assert_eq!(
-            Name::new("Fred", "Flintstone"),
-            Name::parse("Fred Flintstone")
+            Ok(Name::new("Fred", "Flintstone")),
+            "Fred Flintstone".parse()
         );
     }
 
     #[test]
     fn parse_three_part_name() {
         assert_eq!(
-            Name::new("Fred Fredington", "Flintstone"),
-            Name::parse("Fred Fredington Flintstone")
+            Ok(Name::new("Fred Fredington", "Flintstone")),
+            "Fred Fredington Flintstone".parse()
         );
     }
 
     #[test]
     fn parse_single_name() {
-        assert_eq!(Name::new("Fred", ""), Name::parse("Fred"));
+        assert_eq!(Ok(Name::new("Fred", "")), "Fred".parse());
     }
 
     #[test]
     fn parse_day() {
-        assert_eq!(Ok(Day::new(2022, 12, 1)), Day::parse("12/1/2022"));
+        assert_eq!(Ok(Day::new(2022, 12, 1)), "12/1/2022".parse());
     }
 
     #[test]
     fn parse_malformed_day() {
-        assert!(Day::parse("blay").is_err());
+        assert!("blay".parse::<Day>().is_err());
     }
 
     #[test]
     fn parse_leading_zeroes_day() {
-        assert_eq!(Ok(Day::new(2053, 7, 8)), Day::parse("07/08/2053"));
+        assert_eq!(Ok(Day::new(2053, 7, 8)), "07/08/2053".parse());
     }
 }
